@@ -308,6 +308,153 @@
             </td>
         </tr>
     </table>
+            tk.Button(login, text="Login", command=submit_login).grid(row=2, column=1)
+    
+    login.mainloop()
+
+# Function to send the user's voice response and read response from the chat endpoint
+def send_chat_message(auth_token, message, status_label):
+    url = "https://oriented-infinitely-calf.ngrok-free.app/chat"
+    headers = {
+        "Authorization": f"Bearer {auth_token}"
+    }
+    data = {
+        "user_input": message
+    }
+    
+    retry_delay = 1
+    max_retries = 5
+    
+    for attempt in range(max_retries):
+        try:
+            status_label.config(text="Getting response...")
+            response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 200:
+                bot_response = response.text  # Plain text response handling
+                if bot_response:
+                    print(f"Bot: {bot_response}")
+                    status_label.config(text="Bot is speaking...")
+                    engine.say(bot_response)
+                    engine.runAndWait()
+                    status_label.config(text="Listening...")
+                return True
+            elif response.status_code == 429:
+                print(f"Rate limit exceeded. Retrying in {retry_delay} seconds.")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                raise Exception(f"Failed to send message. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2
+    return False
+
+# Function to listen for user's voice input with a timeout
+def listen_for_response(status_label):
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        print("Listening...")
+        status_label.config(text="Listening...")
+        
+        try:
+            audio = recognizer.listen(source, timeout=10)
+            status_label.config(text="Processing your speech...")
+            try:
+                user_response = recognizer.recognize_google(audio)
+                print(f"You: {user_response}")
+                return user_response
+            except sr.UnknownValueError:
+                print("Sorry, I didn't catch that.")
+                status_label.config(text="Didn't catch that, listening again...")
+            except sr.RequestError as e:
+                print(f"Could not request results from Google Speech Recognition service; {e}")
+                status_label.config(text="Recognition service error")
+        except sr.WaitTimeoutError:
+            print("No speech detected within timeout")
+            status_label.config(text="No speech detected, listening again...")
+    
+    return None
+
+# Function to handle the continuous conversation
+def conversation_loop(username, auth_token, status_label, stop_event):
+    while not stop_event.is_set():
+        user_response = listen_for_response(status_label)
+        if user_response:
+            if user_response.lower() == "hey stop":
+                stop_event.set()
+                status_label.config(text="Conversation ended")
+                break
+            
+            if send_chat_message(auth_token, user_response, status_label):
+                continue
+            else:
+                status_label.config(text="Failed to get response, listening again...")
+        
+        time.sleep(0.1)  # Small delay to prevent CPU overuse in the loop
+
+# Function to show the mic and handle voice interaction
+def open_mic_window(username, auth_token):
+    window = tk.Tk()
+    window.title("Voice Conversation")
+    
+    # Create main frame
+    main_frame = tk.Frame(window, padx=20, pady=20)
+    main_frame.pack(expand=True)
+    
+    # Username display
+    tk.Label(main_frame, text=f"User: {username}", font=("Arial", 14)).pack(pady=10)
+    
+    # Mic icon and status in the same frame
+    status_frame = tk.Frame(main_frame)
+    status_frame.pack(pady=10)
+    
+    mic_icon = tk.Label(status_frame, text="🎤", font=("Arial", 48))
+    mic_icon.pack(side=tk.LEFT, padx=10)
+    
+    status_label = tk.Label(status_frame, text="Starting conversation...", font=("Arial", 12))
+    status_label.pack(side=tk.LEFT, padx=10)
+    
+    # Stop button
+    def stop_conversation():
+        stop_event.set()
+        status_label.config(text="Stopping conversation...")
+        window.after(1000, window.destroy)
+    
+    stop_button = tk.Button(main_frame, text="End Conversation", command=stop_conversation)
+    stop_button.pack(pady=10)
+    
+    # Initialize conversation
+    stop_event = threading.Event()
+    
+    # Welcome message
+    status_label.config(text="Bot is speaking...")
+    engine.say(f"Hello {username}, I'm ready to chat with you. You can start speaking after I finish my responses. Say 'hey stop' whenever you want to end our conversation.")
+    engine.runAndWait()
+    status_label.config(text="Listening...")
+    
+    # Start conversation in a separate thread
+    conversation_thread = threading.Thread(
+        target=conversation_loop,
+        args=(username, auth_token, status_label, stop_event)
+    )
+    conversation_thread.daemon = True
+    conversation_thread.start()
+    
+    # Window close handler
+    def on_closing():
+        stop_event.set()
+        window.destroy()
+    
+    window.protocol("WM_DELETE_WINDOW", on_closing)
+    window.mainloop()
+
+if __name__ == "__main__":
+    time.sleep(10)  # Wait for 10 seconds after boot up
+    login_window()
+
    <!--<div class="logo-container" data-aos="zoom-in">
         <img src="assets/images/tmp.png" alt="University Logo">
         <img src="assets/images/wimage.png" alt="University Logo">
